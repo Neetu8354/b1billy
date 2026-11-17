@@ -266,6 +266,93 @@ export function MediaComposer({ kind, file, onSend, onCancel, sending }) {
   );
 }
 
+/* ---------- drag & drop / paste media (same limits as the send-media APIs) ---------- */
+export const MEDIA_LIMITS = { image: 5 * 1024 * 1024, video: 50 * 1024 * 1024 };
+
+export function splitMedia(files) {
+  const items = [];
+  const errors = [];
+  for (const f of files || []) {
+    const kind = f.type?.startsWith("image/") ? "image" : f.type?.startsWith("video/") ? "video" : null;
+    if (!kind) {
+      errors.push(`${f.name || "File"}: not an image or video`);
+      continue;
+    }
+    if (f.size > MEDIA_LIMITS[kind]) {
+      errors.push(`${f.name || "File"}: ${kind} over ${MEDIA_LIMITS[kind] / 1024 / 1024}MB`);
+      continue;
+    }
+    items.push({ kind, file: f });
+  }
+  return { items, error: errors.join(" · ") || null };
+}
+
+/* depth counter so child-element dragenter/leave noise doesn't flicker the veil */
+export function useFileDrop(onFiles) {
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  const dropProps = {
+    onDragEnter: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (e) => {
+      if (!hasFiles(e)) return;
+      depth.current = Math.max(0, depth.current - 1);
+      if (!depth.current) setDragging(false);
+    },
+    onDrop: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setDragging(false);
+      onFiles(e.dataTransfer.files);
+    },
+  };
+  useEffect(() => {
+    const stop = (e) => e.preventDefault();
+    window.addEventListener("dragover", stop);
+    window.addEventListener("drop", stop);
+    return () => {
+      window.removeEventListener("dragover", stop);
+      window.removeEventListener("drop", stop);
+    };
+  }, []);
+  return { dragging, dropProps };
+}
+
+/* pointer-events:none so drops land on the container under the veil */
+export function DropOverlay() {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 4000, pointerEvents: "none",
+        background: "rgba(11,20,26,.55)", display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          border: "3px dashed #25d366", borderRadius: 18, padding: "40px 54px",
+          background: "rgba(17,27,33,.88)", color: "#fff", textAlign: "center",
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+        }}
+      >
+        <i className="fas fa-images" style={{ fontSize: 46, color: "#25d366" }} />
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Drop images or videos to send</div>
+        <div style={{ fontSize: 13, color: "#aebac1" }}>Preview opens before sending</div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- bottom action sheet ---------- */
 export function Sheet({ items, onClose }) {
   return (
